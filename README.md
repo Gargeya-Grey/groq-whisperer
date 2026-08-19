@@ -1,86 +1,112 @@
-# Groq Whisperer: Voice-to-Text Transcription Tool
+# Groq Whisperer
 
-**Groq Whisperer** is a Python-based application that allows users to record audio and transcribe it to text using Groq's Whisper implementation. The transcribed text is automatically copied to the clipboard for easy pasting into other applications.
+Hold a hotkey, speak, release (or press again), and the transcript is pasted into whatever app is focused. Transcription uses Groq’s Whisper API (fast, free-tier API key).
 
-## Features
+This is a Windows-friendly fork of [KennyVaneetvelde/groq_whisperer](https://github.com/KennyVaneetvelde/groq_whisperer). The original “hold Pause, release to stop” flow **does not work on typical PC keyboards**: Pause/Break often never sends a key-up, so the app would keep recording forever. This fork fixes that and the Windows paste path.
 
-- Record audio by holding down the **PAUSE** key
-- Transcribe recorded audio to text using Groq's API
-- Automatically copy transcription to clipboard
-- Continuous operation for multiple recordings
+## Keys
 
-## Prerequisites
+| Key | Behavior |
+|-----|----------|
+| **Pause** | Press once to **start**. Press again to **stop**, transcribe, and paste. |
+| **F8** | **Hold** to talk, **release** to stop (reliable on laptops that hide Pause behind Fn). |
+| **Esc** | Quit |
 
-- Python 3.7 or higher
-- A Groq API key (set as an environment variable)
+Click the text field first. After stop, wait for Groq (usually under a second). If paste misses, **Ctrl+V** — the text is already on the clipboard.
 
-## Installation
+Clips shorter than ~0.4 seconds are ignored so you do not get empty or prompt-echo garbage.
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/KennyVaneetvelde/groq_whisperer
-   cd whisperer
-   ```
+## Why Pause is a toggle
 
-2. Create a virtual environment:
-   ```
-   python -m venv venv
-   ```
+On IBM-style PC keyboards, **Pause does not send a key-up**. Hold-to-talk cannot see “release Pause.” This repo registers Pause as a Windows hotkey instead: each press is start or stop. **F8** is real hold-to-talk for laptops without a usable Pause key.
 
-3. Activate the virtual environment:
-   - On Windows:
-     ```
-     venv\Scripts\activate
-     ```
-   - On macOS and Linux:
-     ```
-     source venv/bin/activate
-     ```
+## Setup
 
-4. Install the required packages:
-   ```
-   pip install -r requirements.txt
-   ```
+You need **Python 3.10+** (3.13 works) and a microphone.
 
-5. Set up your Groq API key as an environment variable:
-   - On Windows:
-     ```
-     setx GROQ_API_KEY "your-api-key-here"
-     ```
-   - On macOS and Linux:
-     ```
-     export GROQ_API_KEY="your-api-key-here"
-     ```
+### 1. Clone
 
-## Usage
+```bash
+git clone https://github.com/Gargeya-Grey/groq-whisperer.git
+cd groq-whisperer
+```
 
-1. Run the script:
-   ```
-   python main.py
-   ```
+### 2. Virtualenv and install
 
-2. Press and hold the PAUSE key to start recording.
-3. Release the PAUSE key to stop recording and start transcription.
-4. The transcribed text will be automatically copied to your clipboard.
-5. Repeat steps 2-4 for additional recordings.
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-## Dependencies
+macOS / Linux:
 
-The project relies on the following main libraries:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-- `pyaudio`: For audio recording
-- `keyboard`: For detecting key presses
-- `pyautogui` and `pyperclip`: For clipboard operations
-- `groq`: For interacting with the Groq API
+`PyAudio` ships a Windows wheel. On Linux you may need PortAudio (`sudo apt install portaudio19-dev`) before `pip install`.
 
-For a complete list of dependencies, see the `requirements.txt` file.
+### 3. Free Groq API key
 
-## Notes
+1. Open **https://console.groq.com/keys**
+2. Sign in (Google / GitHub / email)
+3. **Create API Key** and copy it (shown once)
 
-- Make sure your microphone is properly configured and working before running the script.
-- The transcription quality may vary depending on the audio quality and background noise.
-- Ensure you have a stable internet connection for the transcription process.
+This session only (PowerShell):
+
+```powershell
+$env:GROQ_API_KEY = "your_key_here"
+```
+
+Command Prompt:
+
+```bat
+set GROQ_API_KEY=your_key_here
+```
+
+Permanent (new terminals after this):
+
+```bat
+setx GROQ_API_KEY "your_key_here"
+```
+
+macOS / Linux:
+
+```bash
+export GROQ_API_KEY="your_key_here"
+```
+
+Do not commit the key. Do not put it in the repo.
+
+### 4. Run
+
+Windows: double-click `start.bat`, or:
+
+```bat
+venv\Scripts\python.exe main.py
+```
+
+If the hotkey does not reach other apps, run the terminal **as Administrator**.
+
+## Troubleshooting
+
+| Symptom | What to do |
+|---------|------------|
+| Pause starts but never stops | Use **Pause again** (toggle), not release. Or hold **F8**. |
+| Another app already uses Pause | Close it, or use F8. |
+| Paste does nothing | Click the text field first; then Ctrl+V. Try Run as administrator. |
+| `GROQ_API_KEY is not set` | Set the variable in **that** window, or `setx` and open a new one. |
+| Empty / nonsense transcript | Speak longer than half a second; check the mic. |
+| Linux: `pyaudio` build fails | Install `portaudio19-dev` (or equivalent), then pip again. |
+
+## Credits
+
+- Original project: [KennyVaneetvelde/groq_whisperer](https://github.com/KennyVaneetvelde/groq_whisperer) (MIT)
+- Windows Pause hotkey, F8 hold-to-talk, paste, and short-clip handling: this fork
 
 ## License
 
-[MIT License](LICENSE)
+MIT. See [LICENSE](LICENSE).
