@@ -1,16 +1,20 @@
 import os
 import sys
 import time
+import math
 import tempfile
 import threading
 import wave
 import ctypes
+from array import array
 from ctypes import wintypes
 
 import pyaudio
 import pyperclip
 from groq import Groq
 from pynput import keyboard as pkeyboard
+
+import overlay
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -134,7 +138,33 @@ def _pause_hotkey_thread():
         user32.UnregisterHotKey(None, 1)
 
 
-def record_audio():
+_S16_MAX = 32768.0
+
+def _normalized_level(data, peak):
+    """RMS loudness 0..1 with adaptive peak follower. No per-sample Python
+    objects: raw bytes -> memoryview of shorts, single pass."""
+    n = len(data) // 2
+    if n == 0:
+        return 0.0, peak
+    # array('h') already copies; iterating it was heaviest. Use memoryview for zero-copy.
+    try:
+        mv = memoryview(data).cast('h')  # little-endian shorts, native
+    except Exception:
+        return 0.0, peak
+    if len(mv) == 0:
+        return 0.0, peak
+    s2 = 0
+    for v in mv:
+        s2 += v * v
+    rms = math.sqrt(s2 / len(mv))
+    peak = max(peak * 0.96, rms, 500.0)
+    norm = rms / peak
+    if norm < 0.08:
+        return 0.0, peak
+    return min(1.0, ((norm - 0.08) / 0.92) ** 0.75), peak
+
+
+def record_audio(island):
     p = pyaudio.PyAudio()
     stream = p.open(
         format=pyaudio.paInt16,
@@ -152,7 +182,9 @@ def record_audio():
         p.terminate()
         return None
 
+    island.show_listening()
     frames = []
+    peak = 500.0
     started = time.time()
     while _recording.is_set() or (time.time() - started < 0.12):
         try:
@@ -161,6 +193,8 @@ def record_audio():
             break
         if _recording.is_set():
             frames.append(data)
+            level, peak = _normalized_level(data, peak)
+            island.push_level(level)
         elif time.time() - started >= 0.12:
             break
 
@@ -223,21 +257,18 @@ def paste_text(text):
     print("Copied to clipboard and sent Ctrl+V. If nothing appeared, press Ctrl+V.")
 
 
-def main():
-    threading.Thread(target=_pause_hotkey_thread, daemon=True).start()
-    listener = pkeyboard.Listener(on_press=_on_press, on_release=_on_release)
-    listener.start()
-    print("Groq Whisperer")
-    print("  Pause = press to start, press again to stop")
-    print("  F8    = hold to talk, release to stop")
-    print("Click the text field before you speak.")
+def _pipeline(island):
+    """Record -> transcribe -> paste loop. Runs on a worker thread so the
+    UI (voice island) can own the main thread."""
     try:
         while not _stop_app.is_set():
-            frames = record_audio()
+            frames = record_audio(island)
             if _stop_app.is_set():
                 break
             if not frames:
+                island.show_error("Too short")
                 continue
+            island.show_transcribing()
             path = save_audio(frames)
             print("Transcribing...")
             text = transcribe_audio(path)
@@ -245,16 +276,44 @@ def main():
                 os.unlink(path)
             except OSError:
                 pass
+            if _stop_app.is_set():
+                break
             if text:
                 print("\n---")
                 print(text)
                 print("---")
                 paste_text(text)
+                island.show_success("Pasted")
             else:
                 print("No usable transcription.")
+                island.show_error("No speech found")
     finally:
-        _stop_app.set()
-        listener.stop()
+        island.close()
+
+
+def main():
+    island = overlay.create_island()
+
+    threading.Thread(target=_pause_hotkey_thread, daemon=True).start()
+    listener = pkeyboard.Listener(on_press=_on_press, on_release=_on_release)
+    listener.start()
+
+    worker = threading.Thread(target=_pipeline, args=(island,), daemon=True)
+    worker.start()
+    island.show_status("Ready — Pause or F8")
+
+    print("Groq Whisperer")
+    print("  Pause = press to start, press again to stop")
+    print("  F8    = hold to talk, release to stop")
+    print("Click the text field before you speak.")
+
+    island.run()          # blocks on the UI thread until Esc closes it
+
+    _stop_app.set()
+    _start_gate.set()
+    _recording.clear()
+    listener.stop()
+    worker.join(timeout=3)
 
 
 if __name__ == "__main__":
